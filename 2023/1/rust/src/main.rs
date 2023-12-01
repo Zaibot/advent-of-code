@@ -57,6 +57,26 @@ fn test_example_input() {
 }
 
 #[test]
+fn test_example_input_2() {
+    let expected = [
+        ("two1nine", 29),
+        ("eightwothree", 83),
+        ("abcone2threexyz", 13),
+        ("xtwone3four", 24),
+        ("4nineeightseven2", 42),
+        ("zoneight234", 14),
+        ("7pqrstsixteen", 76),
+    ];
+
+    for (input, expected) in expected {
+        let first_last = extract_digit_first_last(input).unwrap();
+        let combined = combine_digits(first_last).unwrap();
+
+        assert_eq!(combined, expected);
+    }
+}
+
+#[test]
 fn test_combine_digits() {
     #[ rustfmt::skip]
     let expected = [
