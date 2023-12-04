@@ -1,16 +1,22 @@
 use std::collections::binary_heap::PeekMut;
 
 fn main() {
-    let bag = Set::new(12, 13, 14);
-
-    let game_id_sum = std::fs::read_to_string("../input.txt")
-        .expect("Failed to read input.txt")
+    let games = std::fs::read_to_string("../input.txt")
+        .expect("Failed to read ../input.txt")
         .lines()
-        .filter_map(|line| {
+        .map(|line| {
             let tokens = tokenize(line);
             let mut tokens = tokens.iter().peekable();
             let game = Game::from_tokens(&mut tokens);
 
+            game
+        })
+        .collect::<Vec<_>>();
+
+    let bag = Set::new(12, 13, 14);
+    let game_id_sum = games
+        .iter()
+        .filter_map(|game| {
             if game.is_possible(&bag) {
                 Some(game.id)
             } else {
@@ -20,6 +26,10 @@ fn main() {
         .sum::<u32>();
 
     println!("Game ID sum: {}", game_id_sum);
+
+    let game_power_sum = games.iter().map(|game| game.power()).sum::<u32>();
+
+    println!("Game power sum: {}", game_power_sum);
 }
 
 #[derive(Debug, PartialEq)]
@@ -96,6 +106,21 @@ impl Game {
         Self::new(id, sets)
     }
 
+    fn power(&self) -> u32 {
+        let max = self.max();
+        max.red * max.green * max.blue
+    }
+
+    fn max(&self) -> Set {
+        let mut max = Set::new(0, 0, 0);
+        for set in &self.sets {
+            max.red = max.red.max(set.red);
+            max.green = max.green.max(set.green);
+            max.blue = max.blue.max(set.blue);
+        }
+        max
+    }
+
     fn is_possible(&self, bag: &Set) -> bool {
         self.sets.iter().all(|set| set.is_less_than(&bag))
     }
@@ -163,6 +188,29 @@ fn test_example_input() {
         let mut tokens = tokens.iter().peekable();
         let game = Game::from_tokens(&mut tokens);
         assert_eq!(game.is_possible(&bag), expected);
+    }
+}
+
+#[test]
+fn test_example_input_2() {
+    #[rustfmt::skip]
+    let expected = [
+        (Set::new(4,2,6),   48,   "Game 1: 3 blue, 4 red; 1 red, 2 green, 6 blue; 2 green"),
+        (Set::new(1,3,4),   12,   "Game 2: 1 blue, 2 green; 3 green, 4 blue, 1 red; 1 green, 1 blue"),
+        (Set::new(20,13,6), 1560, "Game 3: 8 green, 6 blue, 20 red; 5 blue, 4 red, 13 green; 5 green, 1 red"),
+        (Set::new(14,3,15), 630,  "Game 4: 1 green, 3 red, 6 blue; 3 green, 6 red; 3 green, 15 blue, 14 red"),
+        (Set::new(6,3,2),   36,   "Game 5: 6 red, 1 blue, 3 green; 2 blue, 1 red, 2 green"),
+    ];
+
+    let bag = Set::new(12, 13, 14);
+
+    for (expected, power, input) in expected {
+        let tokens = tokenize(input);
+        let mut tokens = tokens.iter().peekable();
+        let game = Game::from_tokens(&mut tokens);
+
+        assert_eq!(game.max(), expected);
+        assert_eq!(game.power(), power);
     }
 }
 
