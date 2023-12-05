@@ -1,4 +1,4 @@
-use std::cell::{Cell, UnsafeCell};
+use std::cell::Cell;
 
 fn main() {
     let input = std::fs::read_to_string("../input.txt").expect("Failed to read ../input.txt");
@@ -35,16 +35,11 @@ struct Row {
 }
 
 impl Row {
-    fn new(cells: &[i64]) -> Row {
-        Row {
-            cells: cells.to_vec(),
-        }
-    }
-
     fn cells(&self) -> impl Iterator<Item = &i64> {
         self.cells.iter()
     }
 
+    #[cfg(test)]
     fn cell(&self, index: usize) -> i64 {
         self.cells[index]
     }
@@ -112,21 +107,23 @@ impl From<Table> for MapTable {
 impl MapSourceDestination for MapTable {
     fn map_source_destination(&self, source: i64) -> i64 {
         {
+            // Short circuit last used range
             let (src_start, src_end, dst_start) = self.last.get();
             if src_start <= source && source < src_end {
                 return dst_start + source - src_start;
             }
         }
 
-        for i in (0..self.data.len()).step_by(3) {
-            let src_start = self.data[i];
-            let src_end = self.data[i + 1];
-            let dst_start = self.data[i + 2];
+        for i in self.data.chunks_exact(3) {
+            let src_start = i[0];
+            let src_end = i[1];
+            let dst_start = i[2];
             if src_start <= source && source < src_end {
                 self.last.replace((src_start, src_end, dst_start));
                 return dst_start + source - src_start;
             }
         }
+
         source
     }
 }
@@ -279,8 +276,7 @@ impl SeedToLocation {
             seeds: tables
                 .by_name("seeds")
                 .expect("seeds table not found")
-                .clone()
-                .into(),
+                .clone(),
             seed_to_soil: tables
                 .by_name("seed-to-soil map")
                 .expect("seed-to-soil map not found")
