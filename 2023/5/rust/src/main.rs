@@ -1,25 +1,32 @@
-#![allow(dead_code)]
+use std::cell::{Cell, UnsafeCell};
 
 fn main() {
     let input = std::fs::read_to_string("../input.txt").expect("Failed to read ../input.txt");
 
     let tables = parse_input(&input);
+    let seed_to_location = SeedToLocation::from_tables(&tables);
 
-    let seed_location = seeds(&tables)
-        .iter()
-        .copied()
-        .map(|seed| seed_to_location(&tables, seed))
-        .collect::<Vec<_>>();
+    {
+        let seeds = seed_to_location.seeds();
+        let seed_locations = seeds
+            .iter()
+            .map(|&seed| seed_to_location.seed_to_location(seed))
+            .collect::<Vec<_>>();
 
-    println!("Lowest location: {}", seed_location.iter().min().unwrap());
+        println!("Lowest location: {}", seed_locations.iter().min().unwrap());
+    }
 
-    let seed_ranges = seed_ranges(&tables);
-    let seed_locations = seed_ranges_to_locations(&tables, &seed_ranges);
+    {
+        let start = std::time::Instant::now();
+        let seed_ranges = seed_to_location.seed_ranges();
+        let seed_locations = seed_to_location.seed_ranges_to_locations(&seed_ranges);
+        println!("Elapsed: {:?}", start.elapsed());
 
-    println!(
-        "Lowest location by seed ranges: {}",
-        seed_locations.iter().min().unwrap()
-    );
+        println!(
+            "Lowest location by seed ranges: {}",
+            seed_locations.iter().min().unwrap()
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +43,10 @@ impl Row {
 
     fn cells(&self) -> impl Iterator<Item = &i64> {
         self.cells.iter()
+    }
+
+    fn cell(&self, index: usize) -> i64 {
+        self.cells[index]
     }
 }
 
@@ -69,35 +80,59 @@ impl Table {
         self.rows.push(row);
     }
 
-    fn get(&self, cell: Coord) -> i64 {
-        self.rows[cell.1].as_ref()[cell.0]
-    }
-
     fn row(&self, index: usize) -> &Row {
         &self.rows[index]
     }
+}
 
-    fn rows(&self) -> &Vec<Row> {
-        &self.rows
+struct MapTable {
+    last: Cell<(i64, i64, i64)>,
+    data: Box<[i64]>,
+}
+
+impl From<Table> for MapTable {
+    fn from(table: Table) -> MapTable {
+        assert_eq!(table.row(0).cells().count(), 3);
+
+        let mut data = Vec::new();
+
+        for row in table.rows {
+            data.push(row.source_range().start);
+            data.push(row.source_range().end);
+            data.push(row.destination_range().start);
+        }
+
+        MapTable {
+            last: Cell::new((0, 0, 0)),
+            data: data.into_boxed_slice(),
+        }
     }
 }
 
-impl AsRef<Vec<Row>> for Table {
-    fn as_ref(&self) -> &Vec<Row> {
-        &self.rows
+impl MapSourceDestination for MapTable {
+    fn map_source_destination(&self, source: i64) -> i64 {
+        {
+            let (src_start, src_end, dst_start) = self.last.get();
+            if src_start <= source && source < src_end {
+                return dst_start + source - src_start;
+            }
+        }
+
+        for i in (0..self.data.len()).step_by(3) {
+            let src_start = self.data[i];
+            let src_end = self.data[i + 1];
+            let dst_start = self.data[i + 2];
+            if src_start <= source && source < src_end {
+                self.last.replace((src_start, src_end, dst_start));
+                return dst_start + source - src_start;
+            }
+        }
+        source
     }
 }
-
-struct Coord(usize, usize);
 
 trait TableLookup {
     fn by_name(&self, name: impl AsRef<str>) -> Option<&Table>;
-
-    fn cell_by_name(&mut self, table_name: impl AsRef<str>, cell: Coord) -> i64 {
-        self.by_name(table_name.as_ref())
-            .expect(format!("Table not found: {:#?}", table_name.as_ref()).as_str())
-            .get(cell)
-    }
 }
 
 impl<T> TableLookup for T
@@ -167,18 +202,6 @@ fn parse_input(text: &str) -> Vec<Table> {
 
     tables
 }
-
-#[test]
-fn test_input_1() {
-    let tables = parse_input(INPUT_1);
-
-    assert_eq!(tables.len(), 8);
-    assert_eq!(tables[0].name, "seeds");
-    assert_eq!(tables[0].get(Coord(0, 0)), 79);
-    assert_eq!(tables[7].name, "humidity-to-location map");
-    assert_eq!(tables[7].get(Coord(0, 1)), 56);
-}
-
 trait TableMap {
     fn by_source(&self, source: i64) -> Option<&Row>;
     fn by_destination(&self, destination: i64) -> Option<&Row>;
@@ -188,13 +211,13 @@ impl TableMap for Table {
     fn by_source(&self, source: i64) -> Option<&Row> {
         self.rows
             .iter()
-            .find(|row| row.source_range().contains(&source))
+            .find(|&row| row.source_range().contains(&source))
     }
 
     fn by_destination(&self, destination: i64) -> Option<&Row> {
         self.rows
             .iter()
-            .find(|row| row.destination_range().contains(&destination))
+            .find(|&row| row.destination_range().contains(&destination))
     }
 }
 
@@ -226,136 +249,159 @@ impl SomeMap for Row {
     }
 }
 
-fn seeds(tables: &[Table]) -> Vec<i64> {
-    tables
-        .by_name("seeds")
-        .expect("seeds table not found")
-        .row(0)
-        .cells()
-        .copied()
-        .collect()
+trait MapSourceDestination {
+    fn map_source_destination(&self, source: i64) -> i64;
 }
 
-fn seed_ranges(tables: &[Table]) -> Vec<std::ops::Range<i64>> {
-    seeds(tables)
-        .chunks_exact(2)
-        .map(|chunk| chunk[0]..chunk[0] + chunk[1])
-        .collect()
-}
-
-fn seed_to_soil(tables: &[Table], seed: i64) -> i64 {
-    let soil = tables
-        .by_name("seed-to-soil map")
-        .expect("seed-to-soil map not found");
-
-    match soil.by_source(seed) {
-        Some(src) => src.destination_start() + seed - src.source_start(),
-        None => seed,
+impl MapSourceDestination for Table {
+    fn map_source_destination(&self, source: i64) -> i64 {
+        match self.by_source(source) {
+            Some(src) => src.destination_start() + source - src.source_start(),
+            None => source,
+        }
     }
 }
 
-fn soil_to_fertilizer(tables: &[Table], soil: i64) -> i64 {
-    let fertilizer = tables
-        .by_name("soil-to-fertilizer map")
-        .expect("soil-to-fertilizer map not found");
+struct SeedToLocation {
+    seeds: Table,
+    seed_to_soil: MapTable,
+    soil_to_fertilizer: MapTable,
+    fertilizer_to_water: MapTable,
+    water_to_light: MapTable,
+    light_to_temperature: MapTable,
+    temperature_to_humidity: MapTable,
+    humidity_to_location: MapTable,
+}
 
-    match fertilizer.by_source(soil) {
-        Some(src) => src.destination_start() + soil - src.source_start(),
-        None => soil,
+impl SeedToLocation {
+    fn from_tables(tables: &[Table]) -> SeedToLocation {
+        SeedToLocation {
+            seeds: tables
+                .by_name("seeds")
+                .expect("seeds table not found")
+                .clone()
+                .into(),
+            seed_to_soil: tables
+                .by_name("seed-to-soil map")
+                .expect("seed-to-soil map not found")
+                .clone()
+                .into(),
+            soil_to_fertilizer: tables
+                .by_name("soil-to-fertilizer map")
+                .expect("soil-to-fertilizer map not found")
+                .clone()
+                .into(),
+            fertilizer_to_water: tables
+                .by_name("fertilizer-to-water map")
+                .expect("fertilizer-to-water map not found")
+                .clone()
+                .into(),
+            water_to_light: tables
+                .by_name("water-to-light map")
+                .expect("water-to-light map not found")
+                .clone()
+                .into(),
+            light_to_temperature: tables
+                .by_name("light-to-temperature map")
+                .expect("light-to-temperature map not found")
+                .clone()
+                .into(),
+            temperature_to_humidity: tables
+                .by_name("temperature-to-humidity map")
+                .expect("temperature-to-humidity map not found")
+                .clone()
+                .into(),
+            humidity_to_location: tables
+                .by_name("humidity-to-location map")
+                .expect("humidity-to-location map not found")
+                .clone()
+                .into(),
+        }
+    }
+
+    fn seeds(&self) -> Vec<i64> {
+        self.seeds.row(0).cells().copied().collect()
+    }
+
+    fn seed_ranges(&self) -> Vec<std::ops::Range<i64>> {
+        self.seeds()
+            .chunks_exact(2)
+            .map(|chunk| chunk[0]..chunk[0] + chunk[1])
+            .collect()
+    }
+
+    fn seed_to_soil(&self, seed: i64) -> i64 {
+        self.seed_to_soil.map_source_destination(seed)
+    }
+
+    fn soil_to_fertilizer(&self, soil: i64) -> i64 {
+        self.soil_to_fertilizer.map_source_destination(soil)
+    }
+
+    fn fertilizer_to_water(&self, fertilizer: i64) -> i64 {
+        self.fertilizer_to_water.map_source_destination(fertilizer)
+    }
+
+    fn water_to_light(&self, water: i64) -> i64 {
+        self.water_to_light.map_source_destination(water)
+    }
+
+    fn light_to_temperature(&self, light: i64) -> i64 {
+        self.light_to_temperature.map_source_destination(light)
+    }
+
+    fn temperature_to_humidity(&self, temperature: i64) -> i64 {
+        self.temperature_to_humidity
+            .map_source_destination(temperature)
+    }
+
+    fn humidity_to_location(&self, humidity: i64) -> i64 {
+        self.humidity_to_location.map_source_destination(humidity)
+    }
+
+    fn seed_to_location(&self, seed: i64) -> i64 {
+        let soil = self.seed_to_soil(seed);
+        let fertilizer = self.soil_to_fertilizer(soil);
+        let water = self.fertilizer_to_water(fertilizer);
+        let light = self.water_to_light(water);
+        let temperature = self.light_to_temperature(light);
+        let humidity = self.temperature_to_humidity(temperature);
+
+        self.humidity_to_location(humidity)
+    }
+
+    fn seed_ranges_to_locations(&self, seed_ranges: &[std::ops::Range<i64>]) -> Vec<i64> {
+        seed_ranges
+            .iter()
+            .flat_map(|seed_range| {
+                println!("seed_range: {:#?}", seed_range);
+                seed_range.clone()
+            })
+            .map(|seed| self.seed_to_location(seed))
+            .collect()
     }
 }
 
-fn fertilizer_to_water(tables: &[Table], fertilizer: i64) -> i64 {
-    let water = tables
-        .by_name("fertilizer-to-water map")
-        .expect("fertilizer-to-water map not found");
+#[test]
+fn test_input_1() {
+    let tables = parse_input(INPUT_1);
 
-    match water.by_source(fertilizer) {
-        Some(src) => src.destination_start() + fertilizer - src.source_start(),
-        None => fertilizer,
-    }
-}
-
-fn water_to_light(tables: &[Table], water: i64) -> i64 {
-    let light = tables
-        .by_name("water-to-light map")
-        .expect("water-to-light map not found");
-
-    match light.by_source(water) {
-        Some(src) => src.destination_start() + water - src.source_start(),
-        None => water,
-    }
-}
-
-fn light_to_temperature(tables: &[Table], light: i64) -> i64 {
-    let temperature = tables
-        .by_name("light-to-temperature map")
-        .expect("light-to-temperature map not found");
-
-    match temperature.by_source(light) {
-        Some(src) => src.destination_start() + light - src.source_start(),
-        None => light,
-    }
-}
-
-fn temperature_to_humidity(tables: &[Table], temperature: i64) -> i64 {
-    let humidity = tables
-        .by_name("temperature-to-humidity map")
-        .expect("temperature-to-humidity map not found");
-
-    match humidity.by_source(temperature) {
-        Some(src) => src.destination_start() + temperature - src.source_start(),
-        None => temperature,
-    }
-}
-
-fn humidity_to_location(tables: &[Table], humidity: i64) -> i64 {
-    let location = tables
-        .by_name("humidity-to-location map")
-        .expect("humidity-to-location map not found");
-
-    match location.by_source(humidity) {
-        Some(src) => src.destination_start() + humidity - src.source_start(),
-        None => humidity,
-    }
-}
-
-fn seed_to_location(tables: &[Table], seed: i64) -> i64 {
-    let soil = seed_to_soil(tables, seed);
-    let fertilizer = soil_to_fertilizer(tables, soil);
-    let water = fertilizer_to_water(tables, fertilizer);
-    let light = water_to_light(tables, water);
-    let temperature = light_to_temperature(tables, light);
-    let humidity = temperature_to_humidity(tables, temperature);
-    let location = humidity_to_location(tables, humidity);
-
-    location
-}
-
-fn seed_ranges_to_locations(tables: &[Table], seed_ranges: &[std::ops::Range<i64>]) -> Vec<i64> {
-    seed_ranges
-        .iter()
-        .map(|range| {
-            let mut locations = Vec::new();
-            println!("Range: {:#?}", range);
-            for seed in range.clone() {
-                locations.push(seed_to_location(tables, seed));
-            }
-
-            locations
-        })
-        .flatten()
-        .collect()
+    assert_eq!(tables.len(), 8);
+    assert_eq!(tables[0].name, "seeds");
+    assert_eq!(tables[0].row(0).cell(0), 79);
+    assert_eq!(tables[7].name, "humidity-to-location map");
+    assert_eq!(tables[7].row(0).cell(1), 56);
 }
 
 #[test]
 fn test_stage_1_seed_to_soil() {
     let tables = parse_input(INPUT_1);
+    let seed_to_location = SeedToLocation::from_tables(&tables);
 
-    let seed_soil = seeds(&tables)
+    let seed_soil = seed_to_location
+        .seeds()
         .iter()
-        .copied()
-        .map(|seed| (seed, seed_to_soil(&tables, seed)))
+        .map(|&seed| (seed, seed_to_location.seed_to_soil(seed)))
         .collect::<Vec<_>>();
 
     assert_eq!(seed_soil[0].0, 79, "{:#?}", seed_soil[0]);
@@ -374,8 +420,8 @@ fn test_stage_1_seed_to_soil() {
 #[test]
 fn test_stage_2_seed_ranges() {
     let tables = parse_input(INPUT_1);
-
-    let seed_range = seed_ranges(&tables);
+    let seed_to_location = SeedToLocation::from_tables(&tables);
+    let seed_range = seed_to_location.seed_ranges();
 
     assert_eq!(seed_range[0], 79..93);
     assert_eq!(seed_range[1], 55..68);
@@ -384,15 +430,17 @@ fn test_stage_2_seed_ranges() {
 #[test]
 fn test_stage_2_seed_ranges_to_locations() {
     let tables = parse_input(INPUT_1);
+    let seed_to_location = SeedToLocation::from_tables(&tables);
 
-    let seed_ranges = seed_ranges(&tables);
-    let seed_locations = seed_ranges_to_locations(&tables, &seed_ranges);
+    let seed_ranges = seed_to_location.seed_ranges();
+    let seed_locations = seed_to_location.seed_ranges_to_locations(&seed_ranges);
 
     let lowest_location = seed_locations.into_iter().min().unwrap();
 
     assert_eq!(lowest_location, 46);
 }
 
+#[cfg(test)]
 const INPUT_1: &str = r#"
 seeds: 79 14 55 13
 
