@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::ops::RangeInclusive;
 
@@ -10,14 +11,20 @@ fn main() {
 
     let schematic = Schematic::new(schematic);
 
-    let mut sum = 0;
+    let mut sum_pn = 0;
     for row in 0..schematic.height() {
-        sum += sum_partnumbers(row, &schematic);
+        sum_pn += sum_partnumbers(row, &schematic);
     }
+    println!("Sum of part numbers: {}", sum_pn);
 
-    println!("Sum of part numbers: {}", sum);
+    let mut sum_gr = 0;
+    for row in 0..schematic.height() {
+        sum_gr += sum_gearratios(row, &schematic);
+    }
+    println!("Sum of gear ratios: {}", sum_gr);
 }
 
+/// Sum all numbers that have an symbol in any neighbouring cell.
 fn sum_partnumbers(y: isize, schema: &Schematic) -> u32 {
     let mut partnumber_sum = 0;
 
@@ -45,10 +52,47 @@ fn sum_partnumbers(y: isize, schema: &Schematic) -> u32 {
     partnumber_sum
 }
 
+/// Sum for each gear token the product of all neighbouring numbers; having atleast two numbers.
+fn sum_gearratios(y: isize, schema: &Schematic) -> u32 {
+    let mut power_sum = 0;
+
+    let mut x = 0isize;
+    while x < schema.width() {
+        if !matches!(schema.get(x, y), Some(Token::Gear)) {
+            x += 1;
+            continue;
+        }
+
+        let mut num_coords = HashSet::new();
+        for y in (y - 1)..=(y + 1) {
+            for x in (x - 1)..=(x + 1) {
+                if let Some(coord) = schema.start_of_number(x, y) {
+                    num_coords.insert(coord);
+                }
+            }
+        }
+
+        if num_coords.len() >= 2 {
+            let mut values = Vec::new();
+            for (x, y) in num_coords {
+                let (num, _) = schema.number_at(x, y).unwrap();
+                values.push(num);
+            }
+
+            power_sum += values.iter().fold(1 as u32, |acc, x| acc * x);
+        }
+
+        x += 1;
+    }
+
+    power_sum
+}
+
 #[derive(Clone, Copy)]
 enum Token {
     Empty,
     Symbol,
+    Gear,
     Digit(u8),
 }
 
@@ -56,7 +100,8 @@ impl From<char> for Token {
     fn from(c: char) -> Self {
         match c {
             '.' => Token::Empty,
-            '*' | '#' | '+' | '$' | '=' | '%' | '-' | '@' | '/' | '\\' | '&' => Token::Symbol,
+            '#' | '+' | '$' | '=' | '%' | '-' | '@' | '/' | '\\' | '&' => Token::Symbol,
+            '*' => Token::Gear,
             '0'..='9' => Token::Digit(c.to_digit(10).unwrap() as u8),
             _ => panic!("Invalid char: {}", c),
         }
@@ -101,6 +146,10 @@ impl Schematic {
                 if let Some(Token::Symbol) = self.get(x, y) {
                     return true;
                 }
+
+                if let Some(Token::Gear) = self.get(x, y) {
+                    return true;
+                }
             }
         }
 
@@ -124,6 +173,21 @@ impl Schematic {
         match count {
             0 => None,
             _ => Some((sum, count)),
+        }
+    }
+
+    fn start_of_number(&self, x: isize, y: isize) -> Option<(isize, isize)> {
+        let mut count = 0;
+        loop {
+            match self.get(x - count, y) {
+                Some(Token::Digit(_)) => count += 1,
+                _ => break,
+            }
+        }
+
+        match count {
+            0 => None,
+            _ => Some((x - count + 1, y)),
         }
     }
 }
@@ -156,5 +220,115 @@ fn test_example_input_1() {
     for y in 0..schematic.height() {
         let res = sum_partnumbers(y, &schematic);
         assert_eq!(res, expected[y as usize].0);
+    }
+}
+
+#[test]
+fn test_example_input_2() {
+    #[rustfmt::skip]
+    let expected = [
+        (0,      "467..114.."),
+        (16345,  "...*......"),
+        (0,      "..35..633."),
+        (0,      "......#..."),
+        (0,      "617*......"),
+        (0,      ".....+.58."),
+        (0,      "..592....."),
+        (0,      "......755."),
+        (451490, "...$.*...."),
+        (0,      ".664.598.."),
+    ];
+
+    assert_eq!(expected.iter().map(|(s, _)| *s).sum::<u32>(), 467835);
+
+    let schematic = Schematic::new(
+        expected
+            .iter()
+            .map(|(_, line)| parse_tokens(line))
+            .collect(),
+    );
+
+    for y in 0..schematic.height() {
+        let res = sum_gearratios(y, &schematic);
+        assert_eq!(res, expected[y as usize].0);
+    }
+}
+
+#[test]
+fn test_cases_i_might_have_screwed_up() {
+    fn sum_text(text: &str) -> u32 {
+        let schematic = Schematic::new(vec![parse_tokens(text)]);
+
+        let mut sum = 0;
+        for row in 0..schematic.height() {
+            sum += sum_partnumbers(row, &schematic);
+        }
+        sum
+    }
+
+    assert_eq!(sum_text("#1#2#"), 3);
+    assert_eq!(sum_text("1.#2#3#"), 5); // sigh
+    assert_eq!(sum_text("#1#2#.3"), 3);
+    assert_eq!(sum_text("#1.2.3#"), 4);
+}
+
+fn write_debug_schematic(schematic: &Schematic) {
+    let mut output = std::fs::File::create("../output-debug.txt")
+        .expect("Failed to write to ../output-debug.txt");
+
+    for row in 0..schematic.height() {
+        let mut x = 0isize;
+        while x < schematic.width() {
+            match schematic.get(x, row) {
+                Some(Token::Empty) => {
+                    write!(output, " ").unwrap();
+                    x += 1;
+                    continue;
+                }
+
+                Some(Token::Symbol) => {
+                    write!(output, "X").unwrap();
+                    x += 1;
+                    continue;
+                }
+
+                None => {
+                    write!(output, "?").unwrap();
+                    x += 1;
+                    continue;
+                }
+
+                Some(Token::Gear) => {
+                    write!(output, "*").unwrap();
+                    x += 1;
+                    continue;
+                }
+
+                Some(Token::Digit(d)) => {
+                    let (number, digit_count) = match schematic.number_at(x, row) {
+                        Some(r) => r,
+                        None => {
+                            write!(output, ".").unwrap();
+                            x += 1;
+                            continue;
+                        }
+                    };
+
+                    let surrounding_x = (x - 1)..=(x + digit_count + 1);
+                    let surrounding_y = (row - 1)..=(row + 1);
+
+                    if schematic.has_symbol(surrounding_x, surrounding_y) {
+                        write!(output, "{}", number).unwrap();
+                        x += digit_count as isize;
+                    } else {
+                        for _ in 0..digit_count {
+                            write!(output, "-").unwrap();
+                        }
+                        x += digit_count as isize;
+                    }
+                }
+            }
+        }
+        writeln!(output).unwrap();
     }
 }
