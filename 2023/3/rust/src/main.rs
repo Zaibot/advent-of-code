@@ -1,4 +1,5 @@
-use std::ops::{Range, RangeBounds, RangeInclusive};
+use std::io::Write;
+use std::ops::RangeInclusive;
 
 fn main() {
     let schematic = std::fs::read_to_string("../input.txt")
@@ -11,14 +12,37 @@ fn main() {
 
     let mut sum = 0;
     for row in 0..schematic.height() {
-        let s = extract_partnumbers(row, &schematic);
-
-        println!("Row {}: {}", row, s);
-
-        sum += s;
+        sum += sum_partnumbers(row, &schematic);
     }
 
-    println!("Sum: {}", sum);
+    println!("Sum of part numbers: {}", sum);
+}
+
+fn sum_partnumbers(y: isize, schema: &Schematic) -> u32 {
+    let mut partnumber_sum = 0;
+
+    let mut x = 0isize;
+    while x < schema.width() {
+        let (number, digit_count) = match schema.number_at(x, y) {
+            Some(r) => r,
+            None => {
+                x += 1;
+                continue;
+            }
+        };
+
+        let surrounding_x = (x - 1)..=(x + digit_count);
+        let surrounding_y = (y - 1)..=(y + 1);
+
+        if schema.has_symbol(surrounding_x, surrounding_y) {
+            partnumber_sum += number;
+            x += digit_count as isize + 1;
+        } else {
+            x += 1;
+        }
+    }
+
+    partnumber_sum
 }
 
 #[derive(Clone, Copy)]
@@ -83,7 +107,7 @@ impl Schematic {
         false
     }
 
-    fn number_at(&self, x: isize, y: isize) -> (u32, isize) {
+    fn number_at(&self, x: isize, y: isize) -> Option<(u32, isize)> {
         let mut count = 0;
         let mut sum = 0;
         loop {
@@ -96,29 +120,12 @@ impl Schematic {
                 _ => break,
             }
         }
-        (sum, count)
-    }
-}
 
-fn extract_partnumbers(y: isize, grid: &Schematic) -> u32 {
-    let mut partnumber_sum = 0;
-
-    let mut x = 0isize;
-    while x < grid.width() {
-        let (number, digit_count) = grid.number_at(x, y);
-
-        let surrounding_x = (x - 1)..=(x + digit_count + 1);
-        let surrounding_y = (y - 1)..=(y + 1);
-
-        if grid.has_symbol(surrounding_x, surrounding_y) {
-            x += digit_count as isize + 1;
-            partnumber_sum += number;
-        } else {
-            x += 1;
+        match count {
+            0 => None,
+            _ => Some((sum, count)),
         }
     }
-
-    partnumber_sum
 }
 
 #[test]
@@ -147,7 +154,7 @@ fn test_example_input_1() {
     );
 
     for y in 0..schematic.height() {
-        let res = extract_partnumbers(y, &schematic);
+        let res = sum_partnumbers(y, &schematic);
         assert_eq!(res, expected[y as usize].0);
     }
 }
