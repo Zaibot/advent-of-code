@@ -12,6 +12,14 @@ fn main() {
         .collect::<Vec<_>>();
 
     println!("Lowest location: {}", seed_location.iter().min().unwrap());
+
+    let seed_ranges = seed_ranges(&tables);
+    let seed_locations = seed_ranges_to_locations(&tables, &seed_ranges);
+
+    println!(
+        "Lowest location by seed ranges: {}",
+        seed_locations.iter().min().unwrap()
+    );
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -228,6 +236,13 @@ fn seeds(tables: &[Table]) -> Vec<i64> {
         .collect()
 }
 
+fn seed_ranges(tables: &[Table]) -> Vec<std::ops::Range<i64>> {
+    seeds(tables)
+        .chunks_exact(2)
+        .map(|chunk| chunk[0]..chunk[0] + chunk[1])
+        .collect()
+}
+
 fn seed_to_soil(tables: &[Table], seed: i64) -> i64 {
     let soil = tables
         .by_name("seed-to-soil map")
@@ -317,6 +332,22 @@ fn seed_to_location(tables: &[Table], seed: i64) -> i64 {
     location
 }
 
+fn seed_ranges_to_locations(tables: &[Table], seed_ranges: &[std::ops::Range<i64>]) -> Vec<i64> {
+    seed_ranges
+        .iter()
+        .map(|range| {
+            let mut locations = Vec::new();
+            println!("Range: {:#?}", range);
+            for seed in range.clone() {
+                locations.push(seed_to_location(tables, seed));
+            }
+
+            locations
+        })
+        .flatten()
+        .collect()
+}
+
 #[test]
 fn test_stage_1_seed_to_soil() {
     let tables = parse_input(INPUT_1);
@@ -341,16 +372,25 @@ fn test_stage_1_seed_to_soil() {
 }
 
 #[test]
-fn test_stage_1_seed_to_location() {
+fn test_stage_2_seed_ranges() {
     let tables = parse_input(INPUT_1);
 
-    let seed_location = seeds(&tables)
-        .iter()
-        .copied()
-        .map(|seed| seed_to_location(&tables, seed))
-        .collect::<Vec<_>>();
+    let seed_range = seed_ranges(&tables);
 
-    assert_eq!(seed_location, vec![82, 43, 86, 35]);
+    assert_eq!(seed_range[0], 79..93);
+    assert_eq!(seed_range[1], 55..68);
+}
+
+#[test]
+fn test_stage_2_seed_ranges_to_locations() {
+    let tables = parse_input(INPUT_1);
+
+    let seed_ranges = seed_ranges(&tables);
+    let seed_locations = seed_ranges_to_locations(&tables, &seed_ranges);
+
+    let lowest_location = seed_locations.into_iter().min().unwrap();
+
+    assert_eq!(lowest_location, 46);
 }
 
 const INPUT_1: &str = r#"
