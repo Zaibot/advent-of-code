@@ -1,13 +1,20 @@
 fn main() {
-    println!("Hello, world!");
+    let sum_score = std::fs::read_to_string("../input.txt")
+        .expect("Failed to read ../input.txt")
+        .lines()
+        .map(parse_input)
+        .map(|(card, winning)| winning.score(&card))
+        .fold(0, |acc, score| acc + score as u32);
+
+    println!("Sum of scores: {}", sum_score);
 }
 
-struct WinningNumbers(u32, [u8; 5]);
+struct WinningNumbers(u32, Vec<u8>);
 
-struct ScratchCard([u8; 8]);
+struct ScratchCard(Vec<u8>);
 
 impl ScratchCard {
-    fn score(&self, card: &WinningNumbers) -> u8 {
+    fn score(&self, card: &WinningNumbers) -> u32 {
         let mut score = 0;
         for number in &self.0 {
             if card.1.contains(number) {
@@ -37,21 +44,17 @@ fn parse_input(input: &str) -> (WinningNumbers, ScratchCard) {
         panic!("Invalid input");
     };
 
-    let id = id.parse().expect("Invalid card id");
+    let id = id.trim().parse().expect("Invalid card id");
 
     let winningnumbers = winningnumbers
         .split_ascii_whitespace()
         .map(|n| n.parse().expect("Invalid winning number"))
-        .collect::<Vec<u8>>()
-        .try_into()
-        .expect("Count of winning numbers must be 8");
+        .collect::<Vec<u8>>();
 
     let cardnumbers = cardnumbers
         .split_ascii_whitespace()
         .map(|n| n.parse().expect("Invalid card number"))
-        .collect::<Vec<u8>>()
-        .try_into()
-        .expect("Count of card numbers must be 5");
+        .collect::<Vec<u8>>();
 
     (WinningNumbers(id, winningnumbers), ScratchCard(cardnumbers))
 }
